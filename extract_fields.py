@@ -196,10 +196,14 @@ def label_fields(lines, llm):
 
 
 def reread_crop(crop_bgr, llm):
-    # Small crops read poorly; upscale so the text is at least ~64px tall
-    if crop_bgr.shape[0] < 64:
-        s = 64 / crop_bgr.shape[0]
-        crop_bgr = cv2.resize(crop_bgr, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
+    # Text reads well at ~64-160 px tall. Small crops are upscaled; large ones are
+    # shrunk, because the vision model's memory grows with pixel count (a name crop
+    # from a 5712x4284 scan asked for 14 GB on a 6 GB GPU)
+    h, w = crop_bgr.shape[:2]
+    s = min(64 / h if h < 64 else 1.0, 160 / h, 1600 / w)
+    if s != 1.0:
+        interp = cv2.INTER_CUBIC if s > 1 else cv2.INTER_AREA
+        crop_bgr = cv2.resize(crop_bgr, None, fx=s, fy=s, interpolation=interp)
     return _json(llm.chat(REREAD_PROMPT, image_bgr=crop_bgr, max_tokens=64))
 
 
@@ -487,6 +491,8 @@ def main():
                     help="Longest side for OCR text detection; lower is faster, higher finds smaller text")
     ap.add_argument("--ocr_lang", help="PaddleOCR lang, e.g. 'en'; default is PaddleOCR's multilingual model")
     ap.add_argument("--keep_lines", action="store_true", help="Also write all OCR lines")
+    ap.add_argument("--resume", action="store_true",
+                    help="Append to --output and skip images already in it (after a crash or stop)")
     args = ap.parse_args()
 
     if args.provider == "openai":
@@ -501,14 +507,32 @@ def main():
     exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
     files = [src] if src.is_file() else sorted(p for p in src.iterdir() if p.suffix.lower() in exts)
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    done = set()
+    if args.resume and Path(args.output).exists():
+        for line in open(args.output, encoding="utf-8"):
+            try:
+                done.add(json.loads(line)["file"])
+            except (json.JSONDecodeError, KeyError):
+                pass
+        print(f"resume: {len(done)} images already in {args.output}, skipping them")
+
+    failed = []
+    with open(args.output, "a" if args.resume else "w", encoding="utf-8") as f:
         for path in files:
+            if path.name in done:
+                continue
             img = cv2.imread(str(path))
             if img is None:
                 print(f"skip (unreadable): {path.name}")
                 continue
             t0 = time.time()
-            out = extract(img, ocr, llm, args)
+            try:
+                out = extract(img, ocr, llm, args)
+            except Exception as e:  # e.g. GPU out of memory: log it and keep going
+                print(f"FAIL: {path.name}: {type(e).__name__}: {str(e).splitlines()[0][:200]}")
+                failed.append(path.name)
+                _free_gpu()
+                continue
             rec = {"file": path.name, **out["fields"]}
             if args.keep_lines:
                 rec["lines"] = out["lines"]
@@ -517,6 +541,18 @@ def main():
             n = out["fields"]["name"]
             flag = " [review]" if n and n.get("needs_review") else ""
             print(f"done: {path.name} -> {n['text'] if n else None!r}{flag} ({time.time() - t0:.0f}s)")
+    if failed:
+        print(f"\n{len(failed)} failed (not written; re-run with --resume to retry them): "
+              + ", ".join(failed))
+
+
+def _free_gpu():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 
 if __name__ == "__main__":
