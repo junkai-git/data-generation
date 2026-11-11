@@ -27,7 +27,11 @@ Example:
 import argparse
 import base64
 import json
+import multiprocessing
+import os
+import queue
 import re
+import sys
 import time
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -84,8 +88,13 @@ def ocr_device(choice="auto"):
 
 
 def load_ocr(lang=None, det_max_side=1600, device="auto"):
+    # PaddleOCR imports modelscope -> transformers -> torch when they're installed,
+    # and PyTorch's cuDNN then clashes with the GPU build of Paddle (see OCRWorker).
+    # OCR never needs torch, so hide it from this process if nothing has loaded it yet.
+    if "torch" not in sys.modules:
+        sys.modules["torch"] = None
+    device = ocr_device(device)  # imports paddle, before anything else can
     from paddleocr import PaddleOCR
-    device = ocr_device(device)
     print(f"PaddleOCR on {device}")
     # oneDNN (mkldnn) crashes on Paddle 3.x for Windows with
     # "ConvertPirAttribute2RuntimeAttribute not support"; plain CPU kernels work.
@@ -133,11 +142,73 @@ def ocr_lines(img_bgr, ocr):
     return lines
 
 
+class OCRWorker:
+    """PaddleOCR in its own process.
+
+    The GPU builds of Paddle and PyTorch ship different cuDNN versions under the
+    same DLL names, and one process can only load one of them: whichever library
+    loads second fails ("The specified procedure could not be found"). Keeping
+    Paddle in a separate process gives each its own copy.
+    """
+
+    def __init__(self, lang=None, det_max_side=1600, device="auto"):
+        self.cfg = (lang, det_max_side, device)
+        self._start()
+
+    def _start(self):
+        ctx = multiprocessing.get_context("spawn")
+        self.req, self.res = ctx.Queue(), ctx.Queue()
+        self.proc = ctx.Process(target=_ocr_worker, args=(self.req, self.res, *self.cfg),
+                                daemon=True)
+        self.proc.start()
+        self._get()  # wait until the models have loaded
+
+    def _get(self):
+        while True:  # wait as long as the worker is alive; a crash raises instead of hanging
+            try:
+                ok, out = self.res.get(timeout=5)
+                break
+            except queue.Empty:
+                if not self.proc.is_alive():
+                    raise RuntimeError(f"OCR process died (exit code {self.proc.exitcode})")
+        if not ok:
+            raise RuntimeError(out)
+        return out
+
+    def lines(self, img_bgr):
+        if not self.proc.is_alive():  # e.g. crashed on the previous image
+            self._start()
+        self.req.put(img_bgr)
+        return self._get()
+
+    def close(self):
+        if self.proc.is_alive():
+            self.req.put(None)
+            self.proc.join(timeout=10)
+
+
+def _ocr_worker(req, res, lang, det_max_side, device):
+    # PyTorch puts its own NVIDIA DLL folder on PATH when it loads; a worker
+    # started afterwards inherits that and would pick up PyTorch's cuDNN
+    os.environ["PATH"] = os.pathsep.join(
+        p for p in os.environ.get("PATH", "").split(os.pathsep)
+        if not re.search(r"[\\/]torch[\\/]lib", p, re.I))
+    try:
+        ocr = load_ocr(lang, det_max_side, device)
+        res.put((True, None))
+    except Exception as e:
+        res.put((False, f"OCR failed to load: {type(e).__name__}: {e}"))
+        return
+    while (img := req.get()) is not None:
+        try:
+            res.put((True, ocr_lines(img, ocr)))
+        except Exception as e:
+            res.put((False, f"{type(e).__name__}: {e}"))
+
+
 # ---------------------------------------------------------------- LLM calls
 def _json(text):
-    # Drop any reasoning a "thinking" model (e.g. Qwen3.5) wrote before its answer
-    text = re.sub(r"<think>.*?(</think>|$)", "", text or "", flags=re.S)
-    m = re.search(r"\{.*\}", text, re.S)
+    m = re.search(r"\{.*\}", text or "", re.S)
     try:
         return json.loads(m.group(0)) if m else {}
     except json.JSONDecodeError:
@@ -191,11 +262,8 @@ class QwenBackend:
         if image_bgr is not None:
             content.insert(0, {"type": "image"})
             images = [Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))]
-        # enable_thinking=False: Qwen3/3.5 otherwise reason at length before
-        # answering; models without a thinking mode ignore it
         text = self.processor.apply_chat_template(
-            [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True,
-            enable_thinking=False)
+            [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True)
         inputs = self.processor(text=[text], images=images, return_tensors="pt").to(self.model.device)
         with self.torch.inference_mode():
             out = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
@@ -450,7 +518,7 @@ def degree_level(text):
 
 # ---------------------------------------------------------------- extract
 def extract(img_bgr, ocr, llm, args):
-    lines = ocr_lines(img_bgr, ocr)
+    lines = ocr.lines(img_bgr)
     if not lines:
         return {"fields": {"name": None, "date": None, "degree": None}, "lines": []}
     answers = label_fields(lines, llm)
@@ -518,13 +586,14 @@ def main():
                     help="Append to --output and skip images already in it (after a crash or stop)")
     args = ap.parse_args()
 
+    if args.provider == "openai" and not args.model:
+        ap.error("--model is required with --provider openai")
+    # Start the OCR process before PyTorch loads (see OCRWorker)
+    ocr = OCRWorker(args.ocr_lang, args.det_max_side, args.ocr_device)
     if args.provider == "openai":
-        if not args.model:
-            ap.error("--model is required with --provider openai")
         llm = OpenAIBackend(args.model, args.vision_model)
     else:
         llm = QwenBackend(args.model or DEFAULT_QWEN, args.load_in_4bit)
-    ocr = load_ocr(args.ocr_lang, args.det_max_side, args.ocr_device)
 
     src = Path(args.input)
     exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -564,6 +633,7 @@ def main():
             n = out["fields"]["name"]
             flag = " [review]" if n and n.get("needs_review") else ""
             print(f"done: {path.name} -> {n['text'] if n else None!r}{flag} ({time.time() - t0:.0f}s)")
+    ocr.close()
     if failed:
         print(f"\n{len(failed)} failed (not written; re-run with --resume to retry them): "
               + ", ".join(failed))
