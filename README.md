@@ -120,7 +120,7 @@ python visualize_boxes.py --jsonl fields.jsonl --images "dataset/Dataset Certs/N
 ## Part 3: Set up AnyText (on the GPU machine)
 
 1. Install **Miniconda** if the machine doesn't have conda.
-2. Clone AnyText **next to** this folder, not inside it:
+2. Clone AnyText (https://github.com/tyxsspa/AnyText.git) **next to** this folder, not inside it:
    ```bash
    git clone https://github.com/tyxsspa/AnyText.git
    ```
@@ -204,32 +204,3 @@ python edit_names.py verify --output_dir tampered
 This OCRs each edited name and writes `tampered/metadata_verified.jsonl`. Each line has `verified`: `true` when the new name is readable and the old name is gone. Leave out `verified: false` images when training.
 
 ---
-
-## Troubleshooting
-
-These are problems already hit during setup.
-
-| Symptom | Cause / fix |
-|---|---|
-| `No matching distribution found for paddlepaddle` | Wrong Python version. Use 3.10. |
-| `torch.cuda.is_available()` is `False` but `nvidia-smi` sees the GPU | Check `echo $env:CUDA_VISIBLE_DEVICES` (Windows) or `echo $CUDA_VISIBLE_DEVICES` (Linux). If it is `-1`, the GPU is hidden. Set it to `0` for the session, or remove the system variable. |
-| `Qwen2VLVideoProcessor requires the Torchvision library` | Install the matching `torchvision` from the same PyTorch index (it's in `requirements.txt`). |
-| `ModuleNotFoundError: transformers` (or paddleocr, …) | `pip install -r requirements.txt` didn't finish. Run it again and read the error. |
-| `ConvertPirAttribute2RuntimeAttribute not support` | Paddle oneDNN bug on Windows. Already avoided in `extract_fields.py` (`enable_mkldnn=False`). |
-| `import cv2` broken or odd OpenCV errors | Both `opencv-python` and `opencv-contrib-python` are installed. Keep only `opencv-contrib-python`. |
-| AnyText: CUDA out of memory | GPU too small. Needs 8 GB+, about 7.5 GB for one 512×512 image at fp16. Use a bigger GPU or try `--fp16`. |
-| AnyText: unexpected keyword / argument errors | `edit_names.py` was written against a published copy of AnyText's ModelScope wrapper; your version may differ. Adjust the call in `anytext_edit()`. |
-| `verify` fails on most images | Look at a few outputs. AnyText may misspell or leave part of the old name. Try more `--steps`, a different `--seed`, or a better-matching font. |
-
----
-
-## Known limitations
-
-- **Accuracy:** on a 7-certificate sample, dates and degree levels were all right and names were mostly right. Check `needs_review` names before relying on them.
-- **The date and degree are not re-read from the image.** An OCR misread digit, such as 2022 read as 2027, passes through.
-- **Edited regions are softer than the rest.** AnyText works at ≤ 768 px and the result is scaled back up, so detectors may learn that resampling as a shortcut. Mixing in other editing methods (e.g. classic erase-and-render) gives more varied training data.
-- **Extraction is slow** (CPU PaddleOCR).
-
-## Data handling
-
-The outputs are realistic forgeries of real institutions' certificates, made for training forgery detectors. Keep them, with their masks and metadata, inside the project's dataset storage and don't share them outside it.
