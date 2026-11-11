@@ -22,7 +22,7 @@ edit_names.py generate ──► tampered/        (Qwen-Image-Edit-2511, GPU 24 
 edit_names.py verify ──► metadata_verified.jsonl   (PaddleOCR)
 ```
 
-> **Status:** extraction, the `--dry_run` placement check, and the shift-correction and masking steps have been tested on Windows. The actual Qwen-Image-Edit run has **not been tested yet**: the laptop's 6 GB GPU is far too small. Expect to fix small issues on its first run.
+
 
 ---
 
