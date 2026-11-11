@@ -90,6 +90,9 @@ python extract_fields.py --input "dataset/Dataset Certs/Negative Samples" --outp
 - Results are written as each image finishes. Each run **overwrites** `--output`.
 - `--input` takes one image or a folder. Subfolders are **not** searched.
 
+<img width="1023" height="1125" alt="image" src="https://github.com/user-attachments/assets/a51055ba-33be-4f02-95b3-cdfffe770374" />
+
+
 Useful options:
 
 | Option | Default | What it does |
