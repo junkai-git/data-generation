@@ -5,6 +5,7 @@ Builds tampered certificate images for training forgery detectors (TruFor, ASCFo
 1. **Extract** the recipient name, award date and degree from each clean certificate, along with where they are on the image.
 2. **Edit** the name with an AI text-editing model (AnyText) so it reads as a different person, in the original lettering style.
 3. **Verify** each edit with OCR and keep a pixel-accurate mask of what changed.
+4. **Train** once forged certificates are generated and validated, train on models provided by SMU (https://github.com/LifuWang-66/ControlDoc.git)
 
 ```
 clean certificates
