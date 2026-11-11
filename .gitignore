@@ -10,3 +10,6 @@ field_boxes/
 tampered*/
 fields*.jsonl
 fields*.xlsx
+
+# Office lock files (created while a file is open in Excel/Word)
+~$*
