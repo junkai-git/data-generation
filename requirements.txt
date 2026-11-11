@@ -33,5 +33,8 @@ openpyxl==3.1.5
 # Optional: extract_fields.py --provider openai
 openai==3.35.1
 
-# Not here: edit_names.py generate runs in the separate AnyText environment
-# (conda env from the AnyText repo) plus `pip install faker`
+# Name editing (edit_names.py generate): Qwen-Image-Edit-2511 runs through
+# diffusers. Its model card asks for diffusers from GitHub, as the pipeline may
+# be newer than the latest PyPI release
+diffusers @ git+https://github.com/huggingface/diffusers
+faker
