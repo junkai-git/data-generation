@@ -1,0 +1,37 @@
+# Python 3.10 (paddlepaddle has no wheels for 3.14 yet)
+#
+#   py -3.10 -m venv .venv
+#   .\.venv\Scripts\Activate.ps1
+#   pip install -r requirements.txt
+#
+# Versions match the doc_fraud\.venv where these scripts were tested.
+
+# GPU builds of torch/torchvision (CUDA 12.8) come from PyTorch's own index
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# OCR (extract_fields.py, edit_names.py verify)
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+paddlex==3.7.2
+# PaddleOCR pulls in opencv-contrib-python; do not also install opencv-python,
+# the two packages overwrite each other's cv2
+opencv-contrib-python==4.10.0.84
+
+# Local Qwen2.5-VL (extract_fields.py --provider qwen)
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+transformers==5.20.2
+accelerate==1.15.0
+bitsandbytes==0.50.2
+
+# Field parsing and output
+dateparser==1.4.3
+numpy==2.2.6
+pillow==12.3.0
+openpyxl==3.1.5
+
+# Optional: extract_fields.py --provider openai
+openai==3.35.1
+
+# Not here: edit_names.py generate runs in the separate AnyText environment
+# (conda env from the AnyText repo) plus `pip install faker`

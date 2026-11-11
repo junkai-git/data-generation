@@ -1,0 +1,12 @@
+# Python environment and caches (recreate with requirements.txt)
+.venv/
+__pycache__/
+*.pyc
+
+# Certificates and everything derived from them: real people's names,
+# dates and photos. Keep these in the project's data storage, not in git.
+dataset/
+field_boxes/
+tampered*/
+fields*.jsonl
+fields*.xlsx
