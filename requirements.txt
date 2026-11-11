@@ -1,16 +1,22 @@
 # Python 3.10 (paddlepaddle has no wheels for 3.14 yet)
 #
 #   py -3.10 -m venv .venv
-#   .\.venv\Scripts\Activate.ps1
-#   pip install -r requirements.txt
+#   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# Calling the .venv's own python avoids installing into another Python by
+# accident (a plain `pip` may belong to a newer Python with no Paddle packages)
 #
 # Versions match the doc_fraud\.venv where these scripts were tested.
 
 # GPU builds of torch/torchvision (CUDA 12.8) come from PyTorch's own index
 --extra-index-url https://download.pytorch.org/whl/cu128
 
-# OCR (extract_fields.py, edit_names.py verify)
-paddlepaddle==3.3.1
+# OCR (extract_fields.py, edit_names.py verify), GPU build of Paddle (CUDA 12.6).
+# For a machine without an NVIDIA GPU, replace these two lines with
+#   paddlepaddle==3.3.1
+# PaddleOCR then runs on the CPU (much slower)
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+paddlepaddle-gpu==3.3.1
 paddleocr==3.7.0
 paddlex==3.7.2
 # PaddleOCR pulls in opencv-contrib-python; do not also install opencv-python,

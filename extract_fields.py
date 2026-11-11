@@ -73,10 +73,26 @@ NAME_RE = re.compile(r"^[^\W\d_]+(?:[ '\-.,][^\W\d_]*)*$")
 
 
 # ---------------------------------------------------------------- OCR
-def load_ocr(lang=None, det_max_side=1600):
+def ocr_device(choice="auto"):
+    """'gpu:0' when the GPU build of Paddle (paddlepaddle-gpu) can see a GPU."""
+    if choice != "auto":
+        return "gpu:0" if choice == "gpu" else "cpu"
+    import paddle
+    if paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0:
+        return "gpu:0"
+    return "cpu"
+
+
+def load_ocr(lang=None, det_max_side=1600, device="auto"):
     from paddleocr import PaddleOCR
+    device = ocr_device(device)
+    print(f"PaddleOCR on {device}")
+    # oneDNN (mkldnn) crashes on Paddle 3.x for Windows with
+    # "ConvertPirAttribute2RuntimeAttribute not support"; plain CPU kernels work.
+    # (Only affects CPU runs.) Detection runs on a copy downscaled to
+    # det_max_side; recognition still reads full-resolution crops.
     kw = dict(use_doc_orientation_classify=False, use_doc_unwarping=False,
-              use_textline_orientation=False, enable_mkldnn=False,
+              use_textline_orientation=False, enable_mkldnn=False, device=device,
               text_det_limit_type="max", text_det_limit_side_len=det_max_side,
               return_word_box=True)
     if lang:
@@ -119,7 +135,9 @@ def ocr_lines(img_bgr, ocr):
 
 # ---------------------------------------------------------------- LLM calls
 def _json(text):
-    m = re.search(r"\{.*\}", text or "", re.S)
+    # Drop any reasoning a "thinking" model (e.g. Qwen3.5) wrote before its answer
+    text = re.sub(r"<think>.*?(</think>|$)", "", text or "", flags=re.S)
+    m = re.search(r"\{.*\}", text, re.S)
     try:
         return json.loads(m.group(0)) if m else {}
     except json.JSONDecodeError:
@@ -173,8 +191,11 @@ class QwenBackend:
         if image_bgr is not None:
             content.insert(0, {"type": "image"})
             images = [Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))]
+        # enable_thinking=False: Qwen3/3.5 otherwise reason at length before
+        # answering; models without a thinking mode ignore it
         text = self.processor.apply_chat_template(
-            [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True)
+            [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True,
+            enable_thinking=False)
         inputs = self.processor(text=[text], images=images, return_tensors="pt").to(self.model.device)
         with self.torch.inference_mode():
             out = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
@@ -490,6 +511,8 @@ def main():
     ap.add_argument("--det_max_side", type=int, default=1600,
                     help="Longest side for OCR text detection; lower is faster, higher finds smaller text")
     ap.add_argument("--ocr_lang", help="PaddleOCR lang, e.g. 'en'; default is PaddleOCR's multilingual model")
+    ap.add_argument("--ocr_device", choices=["auto", "gpu", "cpu"], default="auto",
+                    help="auto: GPU if the GPU build of Paddle (paddlepaddle-gpu) is installed")
     ap.add_argument("--keep_lines", action="store_true", help="Also write all OCR lines")
     ap.add_argument("--resume", action="store_true",
                     help="Append to --output and skip images already in it (after a crash or stop)")
@@ -501,7 +524,7 @@ def main():
         llm = OpenAIBackend(args.model, args.vision_model)
     else:
         llm = QwenBackend(args.model or DEFAULT_QWEN, args.load_in_4bit)
-    ocr = load_ocr(args.ocr_lang, args.det_max_side)
+    ocr = load_ocr(args.ocr_lang, args.det_max_side, args.ocr_device)
 
     src = Path(args.input)
     exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}

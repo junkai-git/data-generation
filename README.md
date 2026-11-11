@@ -88,7 +88,7 @@ python extract_fields.py --input "dataset/Dataset Certs/Negative Samples" --outp
 
 - The first run downloads Qwen2.5-VL-3B (about 7.5 GB, into the Hugging Face cache) and the PaddleOCR models.
 - The startup line must say `cuda=True`. If it says `cuda=False`, see Troubleshooting.
-- Expect roughly 45–80 s per certificate. Almost all of it is PaddleOCR on the CPU.
+- The startup line `PaddleOCR on gpu:0` means OCR is using the GPU. `PaddleOCR on cpu` means it isn't: then the CPU build `paddlepaddle` is installed instead of `paddlepaddle-gpu`, or the GPU is hidden. On the CPU, expect roughly 45–80 s per certificate, almost all of it OCR.
 - Results are written as each image finishes. Each run **overwrites** `--output`.
 - `--input` takes one image or a folder. Subfolders are **not** searched.
 
@@ -103,6 +103,8 @@ Useful options:
 | `--provider openai --model gpt-4o-mini` | qwen | Use the OpenAI API instead (needs `OPENAI_API_KEY`, paid) |
 | `--reread auto` | `always` | Only re-read names that look unreliable (faster) |
 | `--keep_lines` | off | Also save every OCR line (for debugging) |
+| `--ocr_device` | `auto` | `gpu` / `cpu` to force where PaddleOCR runs |
+| `--resume` | off | Continue an interrupted run: skip images already in `--output` |
 
 Each line of `fields.jsonl` is one certificate:
 - `name`, `date`, `degree` each have:
