@@ -10,6 +10,9 @@ field_boxes/
 tampered*/
 fields*.jsonl
 fields*.xlsx
+# Exception: the extraction results for the (publicly available) sample set
+!fields_v2.jsonl
+!fields_v2.xlsx
 
 # Office lock files (created while a file is open in Excel/Word)
 ~$*
